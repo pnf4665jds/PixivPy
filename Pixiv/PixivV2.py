@@ -1,102 +1,211 @@
-import requests
 import re
 import time
+import datetime
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait as wait
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import traceback
+import threading
+from multiprocessing.pool import ThreadPool
+from pixivapi import Client
+from pixivapi import Size
+from pathlib import Path
 
-s = requests.session()
+# 登陸地址
+loginUrl = 'https://www.pixiv.net/login.php'
+# Pixiv帳號密碼
+pixiv_id = 'yen0205'
+password = 'apnf4665jds'
+
  # 設定Driver的選項功能，並啟動Headless模式
 chromeOptions = Options()  
 chromeOptions.add_argument('--headless')
 chromeOptions.add_argument('--disable-gpu')
 chromeOptions.add_argument('--window-size=1920,1200')
 chromeOptions.add_argument('--log-level=3')     # 避免出現Console訊息
-#driver = webdriver.Chrome()
-driver = webdriver.Chrome(options=chromeOptions)
+chromeOptions.add_argument('--ignore-certificate-errors')
+chromeOptions.add_argument('--ignore-ssl-errors')
+#mainDriver = webdriver.Chrome()
+drivers = []        # 儲存所有產生的Driver
+mainDriver = webdriver.Chrome(options=chromeOptions)
 
 # 紀錄最高收藏數的圖ID
-bestKeepNum = 0     
-bestKeepId = -1
+bestKeepList = []
+
+threads = []
 
 class Pixiv:
-    # 初始化
-    def __init__(self):
-        # 請求封包需要的一些資訊
-        # 登陸地址
-        self.loginUrl = 'https://www.pixiv.net/login.php'
-
-        #Header資訊
-        self.loginHeader = {
-            'Host': "www.pixiv.net",
-            'User-Agent': "Mozilla/5.0 (Windows NT 6.1) AppleWebKit/"  
-            "537.36 (KHTML, like Gecko) Chrome/50.0.2661.87 Safari/537.36",
-            'Referer': "http://www.pixiv.net/",
-            'Content-Type': "application/x-www-form-urlencoded",
-            'Connection': "keep-alive"
-        }
-
-        self.pixiv_id = 'yen0205'
-        self.password = 'apnf4665jds'
-        self.return_to = "http://www.pixiv.net/"
-        self.postKey = []
     
+    def __init__(self):
+        self.loginWithSelenium()
+
     # 利用Web driver模擬登入Pixiv
     def loginWithSelenium(self):
-        driver.get(self.loginUrl)
-        fieldGroup = driver.find_element_by_xpath("//div[@class='input-field-group']")
+        mainDriver.get(loginUrl)
+        fieldGroup = mainDriver.find_element_by_xpath("//div[@class='input-field-group']")
         # 獲取User ID輸入欄
         userNameField = fieldGroup.find_element_by_xpath("//div[@class='input-field']/input[@type='text'][@autocomplete='username']")
-        userNameField.send_keys(self.pixiv_id)
+        userNameField.send_keys(pixiv_id)
         # 獲取密碼輸入欄
         passwordField = fieldGroup.find_element_by_xpath("//div[@class='input-field']/input[@type='password'][@autocomplete='current-password']")
-        passwordField.send_keys(self.password)
+        passwordField.send_keys(password)
         # 獲取提交按鈕
-        submitButton = driver.find_element_by_xpath("//div[@id='LoginComponent']/form/button[@type='submit'][@class='signup-form__submit']")
+        submitButton = mainDriver.find_element_by_xpath("//div[@id='LoginComponent']/form/button[@type='submit'][@class='signup-form__submit']")
         submitButton.click()
 
-    # 取得頁面的html
-    def getPageWithUrl(self, url):
-        return s.get(url).text
-
-    def getBestUrl(self):
-        return "https://www.pixiv.net/artworks/%s" % bestKeepId
-
-    # 取得每一頁最高觀看數的插圖
-    def processItem(self):
-        global bestKeepNum
-        global bestKeepId
-        index = 0
+    def start(self, tag, page):
+        global bestKeepList
+        bestKeepList.clear()
+        # 等待輸入
+        #tag = input("Please input tag: ")
+        #page = int(input("Please input maximum number of page to search: "))
+        # 開始時間
+        print("start time: " + str(datetime.datetime.now()))
+        items = []          # 儲存這一頁的所有插圖Id
+        pageNum = 1         # 從第一頁開始
         toNext = True
-        #path = "//div/div/div/main/section/div/div/figcaption/div/div/ul/li/dl/dd"       # xPath in html to get view number
-        #path = "html/body/div/div/div/div/main/section/div/div/figcaption/div/div/ul/li/a/dl/dd"
-        path = "//figcaption/div/div/ul/li/a/dl/dd"
-        errorCount = 0
-        while index < len(self.items):
+        path = "html/body/div/div/div/div/section/div/ul"       # xPath in html to get illustration id
+        errorCount = 0      # 紀錄數據取得失敗的次數，達到三次將退出
+        while (pageNum < (page + 1)):
             if toNext:
-                item = self.items[index]
-                url = "https://www.pixiv.net/artworks/%s" % item
-                driver.get(url)
+                url = "https://www.pixiv.net/tags/%s/illustrations?p=%d&mode=safe" % (tag, pageNum)
+                print(url)
+                mainDriver.get(url)
                 toNext = False
-            #print("正在處理第%d張圖片，ID是:%d" % (index + 1, int(item)))
+            
+            print('正在處理第%d頁' % pageNum)
             try:
                 timer = 0
                 while True:
                     timer = timer + 1
                     time.sleep(0.5)
-                    #value = driver.find_element_by_xpath(path).get_attribute("innerHTML")
-                    #value = driver.find_element_by_tag_name('figcaption').find_element_by_tag_name('a').find_element_by_tag_name('dd').get_attribute("innerHTML")
-                    value = driver.find_element_by_tag_name('figcaption').find_element_by_xpath(path).get_attribute("innerHTML")
+                    inner_html = mainDriver.find_element_by_xpath(path).get_attribute("innerHTML")
+                    pattern = re.compile('href="/artworks/(.*?)"', re.S)
+                    self.items = list(set(re.findall(pattern, inner_html)))
+                    if len(self.items) > 0:
+                        break
+                    elif timer >= 10:
+                        raise Exception
+            except:
+                pageNum = pageNum - 1
+                print("超時，將會再嘗試%d次" % (2 - errorCount))
+                errorCount = errorCount + 1
+            else:
+                if len(self.items) > 0:
+                    print("ID獲取完成!")
+                    #MyThread(self.items, pageNum)     # 建立新的Thread
+                    PixApi(self.items, pageNum)
+                toNext = True
+                errorCount = 0
+            # 每五頁執行一次
+            if (pageNum % 5) == 0 or pageNum == page:
+                print("開始收集每張圖的收藏數!請稍等!")
+                self.runThread()
+            elif errorCount >= 3:
+                self.runThread()
+                break
+            
+            pageNum = pageNum + 1
+            print('-----------------------------------------------------')
+
+        print("finish time: " + str(datetime.datetime.now()))
+        
+        # 關閉Driver
+        for driver in drivers:
+            driver.close()
+
+        bestKeepList.sort(key=self.takeSecond, reverse=True)
+        #print(len(bestKeepList))
+        bestKeepList = bestKeepList[:100]   # 保留前一百個
+        #print(bestKeepList)
+        self.resultClient = Client()
+        self.resultClient.login(pixiv_id, password)
+
+    def runThread(self):
+        # t.join(): 等待所有子執行序執行結束才會繼續跑主執行序
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        print("清空Thread!")
+        threads.clear()
+
+    def takeSecond(self, element):
+        return element[1]
+
+    def getImage(self, index):
+        id = bestKeepList[index][0]
+        errorCount = 0
+        while errorCount < 3:
+            try:
+                illuData = self.resultClient.fetch_illustration(id)
+                return illuData
+            except:
+                print("fetch err")
+                errorCount = errorCount + 1
+                time.sleep(0.5)
+        return None
+        #illuData.download(directory=Path('D:/123'), size=Size.ORIGINAL)
+
+    def getListSize(self):
+        return bestKeepList.__len__()
+
+class MyThread:
+    # 初始化
+    def __init__(self, items, index):
+        # Multi-Threading
+        print("Page:%d" % index)
+        print(len(items))
+        self.items = items
+        self.threadID = index
+        self.threadLocal = threading.local()
+        self.driver = self.getDriver()
+        drivers.append(self.driver)
+        setattr(self.threadLocal, 'driver', self.driver)
+        thread = threading.Thread(target=self.processItem, name=("Page%d" % index))
+        threads.append(thread)
+        
+    # 取得driver
+    def getDriver(self):
+        driver = getattr(self.threadLocal, 'driver', None)
+        if driver is None:
+            print('None, Create new driver!!')
+            driver = webdriver.Chrome(chrome_options=chromeOptions)
+            setattr(self.threadLocal, 'driver', driver)
+        else:
+            print('Get!!')
+        return driver
+    
+    # 取得每一頁最高收藏數的插圖
+    def processItem(self):
+        bestKeepNum = 0
+        bestKeepId = -1
+        index = 0
+        toNext = True
+        path = "//figcaption/div/div/ul/li/a/dl/dd"         # xPath to get favorite number of illustration
+        errorCount = 0
+        while index < len(self.items):
+            if toNext:
+                item = self.items[index]
+                url = "https://www.pixiv.net/artworks/%s" % item
+                self.driver.get(url)
+                toNext = False
+            #print("正在處理第%d頁，第%d張圖片，ID是:%d" % (self.threadID, index + 1, int(item)))
+            try:
+                timer = 0
+                while True:
+                    timer = timer + 1
+                    time.sleep(0.5)
+                    value = self.driver.find_element_by_tag_name('figcaption').find_element_by_xpath(path).get_attribute("innerHTML")
                     if value != None:
                         break
-                    elif timer == 10:
+                    elif timer >= 10:
                         raise Exception
             except:
                 index = index - 1
-                print("超時，將會再嘗試%d次" % (2 - errorCount))
+                print("超時!!將會再嘗試%d次" % (2 - errorCount))
                 errorCount = errorCount + 1  
             else:
                 value = int(value.replace(',', ''))
@@ -110,58 +219,73 @@ class Pixiv:
                 break
             index = index + 1
 
+        print("第%d頁完成!\n最高收藏數:%d\nID:%d" % (self.threadID, bestKeepNum, bestKeepId))
+        bestKeepList.append((bestKeepId, bestKeepNum))
+        print("-----------------------------------------------")
 
-    def start(self):
-        self.loginWithSelenium()
-        # 等待五秒
-        time.sleep(2)
-        tag = input("Please input tag: ")
-        page = int(input("Please input maximum number of page to search: "))
-        self.items = []
-        pageNum = 1
-        toNext = True
-        path = "html/body/div/div/div/div/section/div/ul"       # xPath in html to get illustration id
+class PixApi:
+    # 初始化
+    def __init__(self, items, index):
+        # Multi-Threading
+        print("Page:%d" % index)
+        print(len(items))
+        self.items = items
+        self.threadID = index
+        self.threadLocal = threading.local()
+        self.client = Client()
+        self.illuData = None
+        setattr(self.threadLocal, 'client', self.client)
+        setattr(self.threadLocal, 'items', self.items)
+        self.client.login(pixiv_id, password)
+        time.sleep(5)
+        thread = threading.Thread(target=self.processItem, name=("Page%d" % index))
+        threads.append(thread)
+    
+    # 取得每一頁最高收藏數的插圖
+    def processItem(self):
+        #bestKeepNum = 0
+        #bestKeepId = -1
+        index = 0
         errorCount = 0
-        while (pageNum < (page + 1)):
-            if toNext:
-                url = "https://www.pixiv.net/tags/%s/artworks?p=%d&mode=safe" % (tag, pageNum)
-                driver.get(url)
-                toNext = False
-            # 等待10秒來取得動態產生之物件的內容
-            # 若超時則重新讀取
-            print('正在處理第%d頁' % pageNum)
+        item = None
+        getVal = False
+        while index < len(self.items):
             try:
-                #inner_html = wait(driver, 10).until(lambda browser: driver.find_element_by_xpath(path).get_attribute("innerHTML").strip())
-                #wait(driver, 10).until(lambda browser: driver.find_element_by_xpath(path).get_attribute("innerHTML").strip() != inner_html)
                 timer = 0
-                while True:
-                    timer = timer + 1
-                    time.sleep(0.5)
-                    inner_html = driver.find_element_by_xpath(path).get_attribute("innerHTML")
-                    pattern = re.compile('href="/artworks/(.*?)"', re.S)
-                    self.items = list(set(re.findall(pattern, inner_html)))
-                    if len(self.items) > 55:
+                while timer < 3 and index < len(self.items):
+                    item = self.items[index]
+                    #print("正在處理第%d頁，第%d張圖片，ID是:%d" % (self.threadID, index + 1, int(item)))
+                    try:
+                        self.illuData = self.client.fetch_illustration(int(item))
+                    except:
+                        pass
+                    if self.illuData != None:
+                        getVal = True
                         break
-                    elif timer == 10:
-                        raise Exception
-            except:
-                pageNum = pageNum - 1
-                print("超時，將會再嘗試%d次" % (2 - errorCount))
-                errorCount = errorCount + 1
-            else:
-                #print(self.items)
-                print("ID獲取完成!")
-                self.processItem()
-                toNext = True
-                errorCount = 0
+                    time.sleep(1)
+                    timer = timer + 1
+                
+            except Exception as E:
+                index = index - 1
+                print(E)
+                errorCount = errorCount + 1  
+            if getVal:
+                value = int(self.illuData.total_bookmarks)
+                #print("ID: %s, 收藏數: %d" % (item, value))
+                #if value > bestKeepNum:
+                        #bestKeepNum = value
+                        #bestKeepId = int(item)                  
+                bestKeepList.append((int(item), value))
+                getVal = False
+
             if errorCount >= 3:
                 break
+            index = index + 1
 
-            pageNum = pageNum + 1
-            print('-----------------------------------------------------')
-        
-        print("結果:\nID:%d\n收藏數:%d" % (bestKeepId, bestKeepNum))
-        # 關閉Driver
-        driver.close()
+        #print("第%d頁完成!\n最高收藏數:%d\nID:%d" % (self.threadID, bestKeepNum, bestKeepId))
+        #bestKeepList.append((bestKeepId, bestKeepNum))
+        print("Thread%d OK!------------------------------------------" % self.threadID)
 
-Pixiv().start()
+#Pixiv().start()
+
+

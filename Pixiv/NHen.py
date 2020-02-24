@@ -6,13 +6,12 @@ import http.cookiejar
 
 class NHen:
     # constructor
-    def __init__(self, tag, gui):
+    def __init__(self, tag):
         self.tagUrl = "https://nhentai.net/search/?q=" + tag  # nHen url for tag
         self.baseUrl = "https://nhentai.net/g/"     # nHen url for each comic
         self.cookie = http.cookiejar.LWPCookieJar()
         self.cookieHandler = urllib.request.HTTPCookieProcessor(self.cookie)
         self.opener = urllib.request.build_opener(self.cookieHandler)
-        self.gui = gui
 
     def getPicInPage(self, page):
         headers = {'User-Agent':'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:23.0) Gecko/20100101 Firefox/23.0'}     # add headers to avoid 403:forbidden error
