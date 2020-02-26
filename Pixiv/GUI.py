@@ -12,11 +12,20 @@ small_font = ('Verdana', 16)
 
 number = 0
 loading = False
-pixivObj = None
 
 class MyGUI:
+    safeButtonState = True
+
     # 初始化
     def __init__(self):
+        # 建立Pixiv物件
+        self.pixiv = PixivV2.Pixiv()
+        # 登入視窗
+        self.success = False
+        self.loginGUI()
+        if not self.success:
+            return
+
         # 建立主視窗和 Frame（把元件變成群組的容器）
         self.window = tk.Tk()
         self.window.geometry('1024x720+0+0')
@@ -39,6 +48,9 @@ class MyGUI:
         self.pageLabel.pack(side=tk.LEFT)
         self.pageEntry = tk.Entry(self.bottom_frame, font=large_font, width=10)
         self.pageEntry.pack(side=tk.LEFT)
+        # 過濾模式
+        self.safeModeButton = tk.Button(self.bottom_frame, text="Safe", width=16, command=self.toggle)
+        self.safeModeButton.pack(pady=5, side=tk.LEFT)
         # 讀取提示Label
         self.loadLabel = tk.Label(self.top_frame, font=large_font, text='')
         self.loadLabel.pack(side=tk.LEFT)
@@ -63,10 +75,54 @@ class MyGUI:
         # 圖片展示處
         self.label_image = tk.Label(self.window)
         self.label_image.pack()
-        # 初始化pixiv
-        self.pixiv = PixivV2.Pixiv()
         # 開始運行
         self.window.mainloop()      
+
+    # 安全模式開關
+    def toggle(self):
+        self.safeButtonState = not self.safeButtonState
+        if self.safeButtonState:
+            self.safeModeButton['text'] = 'Safe'
+        else:
+            self.safeModeButton['text'] = 'All'
+
+    # 登入用GUI
+    def loginGUI(self):
+        def winClose():
+            loginWin.destroy()
+
+        def tryLogin():
+            failLabel['text'] = ''
+            self.pixiv.loginWithSelenium(idEntry.get(), passEntry.get())
+            self.success = self.pixiv.ifLoginSuccess()
+            # 成功登入時關閉視窗，失敗時顯示Fail提示
+            if self.success:
+                winClose()
+            else:
+                failLabel['text'] = 'Fail!!'
+
+        loginWin = tk.Tk()
+        loginWin.geometry('600x400+100+100')
+        # 帳號輸入欄
+        idLabel = tk.Label(loginWin, font=large_font, text='User: ')
+        idLabel.pack(side=tk.TOP)
+        idEntry = tk.Entry(loginWin, font=large_font, width=10)
+        idEntry.pack(side=tk.TOP)
+        # 密碼輸入欄
+        passLabel = tk.Label(loginWin, font=large_font, text='Pass: ')
+        passLabel.pack(side=tk.TOP)
+        passEntry = tk.Entry(loginWin, font=large_font, width=10)
+        passEntry.pack(side=tk.TOP)
+        # 登入按鈕
+        login_button = tk.Button(loginWin, text="Login", font=small_font, command=tryLogin) 
+        login_button.pack(side=tk.TOP)
+        # 離開按鈕
+        exit_button = tk.Button(loginWin, text="Quit", font=small_font, command=winClose)
+        exit_button.pack(side=tk.TOP)
+        # 提示
+        failLabel = tk.Label(loginWin, font=large_font, text='')
+        failLabel.pack(side=tk.TOP)
+        loginWin.mainloop()
 
     # 設置圖片
     def setImage(self, data, number):
@@ -90,6 +146,7 @@ class MyGUI:
     
     # 開始search的thread
     def search(self):
+        self.pixiv.safeMode = self.safeButtonState
         t = threading.Thread(target=self.process)
         t.start()
 
@@ -102,7 +159,6 @@ class MyGUI:
     def process(self):
         global number
         global loading
-        global pixivObj
         #nHen = NHen.NHen(self.entry.get(), self)
         #self.imgs = nHen.getPicInPage(1)
         #self.setImage(self.imgs[1][1])
@@ -128,6 +184,7 @@ class MyGUI:
             self.pre_button["state"] = "disabled"
             number = 0
             loading = False
+            self.loadLabel.grid_remove()
 
     # 切換下一張圖，dir值為1表示往後,-1表示往前
     def nextImage(self, dir):
@@ -148,7 +205,7 @@ class MyGUI:
             self.setImage(data, number + 1)
             self.setButtons(True)
             loading = False
-
+            self.loadLabel.grid_remove()
              # 防止超出範圍
             if number == 0:
                 self.pre_button["state"] = "disabled"
@@ -185,7 +242,6 @@ class MyGUI:
             g = g - 15 * sign
             b = b - 15 * sign
             time.sleep(0.1)
-        self.loadLabel.grid_remove()
     
     # 關閉視窗
     def winClose(self):

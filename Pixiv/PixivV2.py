@@ -16,8 +16,10 @@ from pathlib import Path
 # 登陸地址
 loginUrl = 'https://www.pixiv.net/login.php'
 # Pixiv帳號密碼
-pixiv_id = 'yen0205'
-password = 'apnf4665jds'
+#pixiv_id = 'yen0205'
+#password = 'apnf4665jds'
+pixiv_id = -1
+password = -1
 
  # 設定Driver的選項功能，並啟動Headless模式
 chromeOptions = Options()  
@@ -34,33 +36,43 @@ mainDriver = webdriver.Chrome(options=chromeOptions)
 # 紀錄最高收藏數的圖ID
 bestKeepList = []
 
+# 儲存子執行序
 threads = []
 
 class Pixiv:
+    safeMode = None
     
+    # 物件初始化
     def __init__(self):
-        self.loginWithSelenium()
+        mainDriver.get(loginUrl)
 
     # 利用Web driver模擬登入Pixiv
-    def loginWithSelenium(self):
-        mainDriver.get(loginUrl)
+    def loginWithSelenium(self, id, pw):
+        global pixiv_id
+        global password
+        pixiv_id = id
+        password = pw
         fieldGroup = mainDriver.find_element_by_xpath("//div[@class='input-field-group']")
         # 獲取User ID輸入欄
         userNameField = fieldGroup.find_element_by_xpath("//div[@class='input-field']/input[@type='text'][@autocomplete='username']")
+        userNameField.clear()
         userNameField.send_keys(pixiv_id)
         # 獲取密碼輸入欄
         passwordField = fieldGroup.find_element_by_xpath("//div[@class='input-field']/input[@type='password'][@autocomplete='current-password']")
+        passwordField.clear()
         passwordField.send_keys(password)
         # 獲取提交按鈕
         submitButton = mainDriver.find_element_by_xpath("//div[@id='LoginComponent']/form/button[@type='submit'][@class='signup-form__submit']")
         submitButton.click()
 
+    def ifLoginSuccess(self):
+        time.sleep(3)
+        return mainDriver.current_url == 'https://www.pixiv.net/'
+
+    # 用於取得一個頁面內所有圖片ID，目前一頁最多60個ID
     def start(self, tag, page):
         global bestKeepList
         bestKeepList.clear()
-        # 等待輸入
-        #tag = input("Please input tag: ")
-        #page = int(input("Please input maximum number of page to search: "))
         # 開始時間
         print("start time: " + str(datetime.datetime.now()))
         items = []          # 儲存這一頁的所有插圖Id
@@ -70,7 +82,10 @@ class Pixiv:
         errorCount = 0      # 紀錄數據取得失敗的次數，達到三次將退出
         while (pageNum < (page + 1)):
             if toNext:
-                url = "https://www.pixiv.net/tags/%s/illustrations?p=%d&mode=safe" % (tag, pageNum)
+                if self.safeMode:
+                    url = "https://www.pixiv.net/tags/%s/illustrations?p=%d&mode=safe" % (tag, pageNum)
+                else:
+                    url = "https://www.pixiv.net/tags/%s/illustrations?p=%d" % (tag, pageNum)
                 print(url)
                 mainDriver.get(url)
                 toNext = False
@@ -123,6 +138,7 @@ class Pixiv:
         self.resultClient = Client()
         self.resultClient.login(pixiv_id, password)
 
+    # 執行儲存於threads中的子執行序，並於完成後清除
     def runThread(self):
         # t.join(): 等待所有子執行序執行結束才會繼續跑主執行序
         for t in threads:
@@ -132,9 +148,11 @@ class Pixiv:
         print("清空Thread!")
         threads.clear()
 
+    # 用於排序所使用的compare函式
     def takeSecond(self, element):
         return element[1]
 
+    # 利用Pixiv api取得指定ID的圖片資訊
     def getImage(self, index):
         id = bestKeepList[index][0]
         errorCount = 0
@@ -149,6 +167,7 @@ class Pixiv:
         return None
         #illuData.download(directory=Path('D:/123'), size=Size.ORIGINAL)
 
+    # 取得儲存前100名的List之大小
     def getListSize(self):
         return bestKeepList.__len__()
 
@@ -243,8 +262,6 @@ class PixApi:
     
     # 取得每一頁最高收藏數的插圖
     def processItem(self):
-        #bestKeepNum = 0
-        #bestKeepId = -1
         index = 0
         errorCount = 0
         item = None
@@ -254,7 +271,6 @@ class PixApi:
                 timer = 0
                 while timer < 3 and index < len(self.items):
                     item = self.items[index]
-                    #print("正在處理第%d頁，第%d張圖片，ID是:%d" % (self.threadID, index + 1, int(item)))
                     try:
                         self.illuData = self.client.fetch_illustration(int(item))
                     except:
@@ -270,11 +286,7 @@ class PixApi:
                 print(E)
                 errorCount = errorCount + 1  
             if getVal:
-                value = int(self.illuData.total_bookmarks)
-                #print("ID: %s, 收藏數: %d" % (item, value))
-                #if value > bestKeepNum:
-                        #bestKeepNum = value
-                        #bestKeepId = int(item)                  
+                value = int(self.illuData.total_bookmarks)           
                 bestKeepList.append((int(item), value))
                 getVal = False
 
@@ -282,10 +294,4 @@ class PixApi:
                 break
             index = index + 1
 
-        #print("第%d頁完成!\n最高收藏數:%d\nID:%d" % (self.threadID, bestKeepNum, bestKeepId))
-        #bestKeepList.append((bestKeepId, bestKeepNum))
         print("Thread%d OK!------------------------------------------" % self.threadID)
-
-#Pixiv().start()
-
-
