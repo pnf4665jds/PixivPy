@@ -78,7 +78,7 @@ class Pixiv:
         items = []          # 儲存這一頁的所有插圖Id
         pageNum = 1         # 從第一頁開始
         toNext = True
-        path = "html/body/div/div/div/div/section/div/ul"       # xPath in html to get illustration id
+        path = "html/body/div/div/div/div/div/div/section/div/ul"       # xPath in html to get illustration id
         errorCount = 0      # 紀錄數據取得失敗的次數，達到三次將退出
         while (pageNum < (page + 1)):
             if toNext:
@@ -211,7 +211,7 @@ class MyThread:
                 url = "https://www.pixiv.net/artworks/%s" % item
                 self.driver.get(url)
                 toNext = False
-            #print("正在處理第%d頁，第%d張圖片，ID是:%d" % (self.threadID, index + 1, int(item)))
+            print("正在處理第%d頁，第%d張圖片，ID是:%d" % (self.threadID, index + 1, int(item)))
             try:
                 timer = 0
                 while True:

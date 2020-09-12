@@ -111,7 +111,7 @@ class MyGUI:
         # 密碼輸入欄
         passLabel = tk.Label(loginWin, font=large_font, text='Pass: ')
         passLabel.pack(side=tk.TOP)
-        passEntry = tk.Entry(loginWin, font=large_font, width=10)
+        passEntry = tk.Entry(loginWin, font=large_font, width=10, show="*")
         passEntry.pack(side=tk.TOP)
         # 登入按鈕
         login_button = tk.Button(loginWin, text="Login", font=small_font, command=tryLogin) 
